@@ -87,6 +87,13 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
+      - name: Configure SDK (non-interactive)
+        working-directory: ${{ env.SDK_DIR }}
+        run: |
+          set -eux
+          export TERM=xterm
+          yes "" | make defconfig
+
       - name: Build MDK4
         working-directory: ${{ env.SDK_DIR }}
         run: |
@@ -187,6 +194,13 @@ jobs:
           set -eux
           ./scripts/feeds update -a
           ./scripts/feeds install -a
+
+      - name: Configure SDK (non-interactive)
+        working-directory: ${{ env.SDK_DIR }}
+        run: |
+          set -eux
+          export TERM=xterm
+          yes "" | make defconfig
 
       - name: Build MDK4
         working-directory: ${{ env.SDK_DIR }}
