@@ -1,0 +1,359 @@
+name: Build MDK4 OpenWrt IPKs
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+
+  build-mt7621:
+    name: MDK4 - MT7621 - OpenWrt 23.05.5
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            clang \
+            flex \
+            bison \
+            gawk \
+            gettext \
+            git \
+            libncurses-dev \
+            libssl-dev \
+            python3 \
+            python3-pip \
+            python3-setuptools \
+            rsync \
+            unzip \
+            wget \
+            zstd \
+            xz-utils \
+            file
+
+      - name: Download OpenWrt 23.05.5 MT7621 SDK
+        working-directory: ${{ runner.temp }}
+        run: |
+          set -euo pipefail
+
+          SDK="openwrt-sdk-23.05.5-ramips-mt7621_gcc-12.3.0_musl.Linux-x86_64.tar.xz"
+          BASE="https://downloads.openwrt.org/releases/23.05.5/targets/ramips/mt7621"
+
+          wget -q --timeout=30 --tries=3 "$BASE/$SDK"
+          wget -q --timeout=30 --tries=3 "$BASE/sha256sums"
+
+          EXPECTED_SHA="$(
+            awk -v sdk="$SDK" '
+              {
+                file = $2
+                gsub(/\r/, "", file)
+                sub(/^\*/, "", file)
+                sub(/^\.\//, "", file)
+
+                n = split(file, parts, "/")
+                if (n > 0) {
+                  file = parts[n]
+                }
+
+                if (file == sdk) {
+                  print $1
+                  exit
+                }
+              }
+            ' sha256sums
+          )"
+
+          if [ -z "$EXPECTED_SHA" ]; then
+            echo "No checksum found for $SDK"
+            echo "Available SDK entries:"
+            grep -E '(^|/).*sdk.*\.(tar\.xz|tar\.zst|tar\.gz)$' sha256sums || true
+            exit 1
+          fi
+
+          printf '%s  %s\n' "$EXPECTED_SHA" "$SDK" | sha256sum -c -
+
+          tar -xf "$SDK"
+
+          SDK_DIR="${SDK%.tar.xz}"
+
+          echo "SDK_DIR=$RUNNER_TEMP/$SDK_DIR" >> "$GITHUB_ENV"
+
+      - name: Prepare package
+        run: |
+          set -eux
+
+          mkdir -p "$SDK_DIR/package/mdk4"
+
+          cp -a package/mdk4/. "$SDK_DIR/package/mdk4/"
+
+          echo "=== package/mdk4 ==="
+          find "$SDK_DIR/package/mdk4" -maxdepth 3 -type f -print
+
+      - name: Update feeds
+        working-directory: ${{ env.SDK_DIR }}
+        run: |
+          set -eux
+
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Configure SDK
+        working-directory: ${{ env.SDK_DIR }}
+        run: |
+          set -eux
+
+          make defconfig
+
+      - name: Show target information
+        working-directory: ${{ env.SDK_DIR }}
+        run: |
+          set -eux
+
+          echo "=== Target ==="
+          grep -E \
+            'CONFIG_TARGET_ramips=y|CONFIG_TARGET_ramips_mt7621=y|CONFIG_ARCH="mipsel_24kc"' \
+            .config || true
+
+          echo
+          echo "=== libpcap ==="
+          find staging_dir -type f \
+            \( -name 'pcap.h' -o -name 'libpcap*.a' -o -name 'libpcap*.so*' \) \
+            -print 2>/dev/null | head -50 || true
+
+          echo
+          echo "=== libnl ==="
+          find staging_dir -type f \
+            \( -name 'libnl*.pc' -o -name 'libnl*.a' -o -name 'libnl*.so*' \) \
+            -print 2>/dev/null | head -100 || true
+
+      - name: Build MDK4
+        working-directory: ${{ env.SDK_DIR }}
+        run: |
+          set -eux
+
+          make package/mdk4/clean V=s || true
+          make package/mdk4/compile V=s
+
+      - name: Verify package
+        working-directory: ${{ env.SDK_DIR }}
+        run: |
+          set -eux
+
+          echo "=== IPK files ==="
+          find bin/packages -type f -name 'mdk4_*.ipk' -print
+
+          IPK="$(find bin/packages -type f -name 'mdk4_*.ipk' | head -1)"
+
+          test -n "$IPK"
+          test -f "$IPK"
+
+          echo
+          echo "=== Package architecture ==="
+          tar -xOf "$IPK" ./control.tar.gz | tar -xzOf - ./control | grep -E '^(Package|Version|Architecture|Depends):'
+
+          echo
+          echo "=== Extract binary ==="
+          rm -rf /tmp/mdk4-check
+          mkdir -p /tmp/mdk4-check
+
+          tar -xOf "$IPK" ./data.tar.gz | tar -xzOf - ./usr/sbin/mdk4 > /tmp/mdk4-check/mdk4
+
+          file /tmp/mdk4-check/mdk4
+
+          echo
+          echo "=== ELF check ==="
+          readelf -h /tmp/mdk4-check/mdk4 | grep -E 'Class|Machine'
+
+      - name: Upload MT7621 IPK
+        uses: actions/upload-artifact@v4
+        with:
+          name: mdk4-openwrt-23.05.5-mt7621
+          path: |
+            ${{ env.SDK_DIR }}/bin/packages/**/*.ipk
+          if-no-files-found: error
+          retention-days: 30
+
+
+  build-filogic:
+    name: MDK4 - Filogic - OpenWrt 24.10.0
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            clang \
+            flex \
+            bison \
+            gawk \
+            gettext \
+            git \
+            libncurses-dev \
+            libssl-dev \
+            python3 \
+            python3-pip \
+            python3-setuptools \
+            rsync \
+            unzip \
+            wget \
+            zstd \
+            xz-utils \
+            file
+
+      - name: Download OpenWrt 24.10.0 Filogic SDK
+        working-directory: ${{ runner.temp }}
+        run: |
+          set -euo pipefail
+
+          SDK="openwrt-sdk-24.10.0-mediatek-filogic_gcc-13.3.0_musl.Linux-x86_64.tar.zst"
+          BASE="https://downloads.openwrt.org/releases/24.10.0/targets/mediatek/filogic"
+
+          wget -q --timeout=30 --tries=3 "$BASE/$SDK"
+          wget -q --timeout=30 --tries=3 "$BASE/sha256sums"
+
+          EXPECTED_SHA="$(
+            awk -v sdk="$SDK" '
+              {
+                file = $2
+                gsub(/\r/, "", file)
+                sub(/^\*/, "", file)
+                sub(/^\.\//, "", file)
+
+                n = split(file, parts, "/")
+                if (n > 0) {
+                  file = parts[n]
+                }
+
+                if (file == sdk) {
+                  print $1
+                  exit
+                }
+              }
+            ' sha256sums
+          )"
+
+          if [ -z "$EXPECTED_SHA" ]; then
+            echo "No checksum found for $SDK"
+            echo "Available SDK entries:"
+            grep -E '(^|/).*sdk.*\.(tar\.xz|tar\.zst|tar\.gz)$' sha256sums || true
+            exit 1
+          fi
+
+          printf '%s  %s\n' "$EXPECTED_SHA" "$SDK" | sha256sum -c -
+
+          tar --zstd -xf "$SDK"
+
+          SDK_DIR="${SDK%.tar.zst}"
+
+          echo "SDK_DIR=$RUNNER_TEMP/$SDK_DIR" >> "$GITHUB_ENV"
+
+      - name: Prepare package
+        run: |
+          set -eux
+
+          mkdir -p "$SDK_DIR/package/mdk4"
+
+          cp -a package/mdk4/. "$SDK_DIR/package/mdk4/"
+
+          echo "=== package/mdk4 ==="
+          find "$SDK_DIR/package/mdk4" -maxdepth 3 -type f -print
+
+      - name: Update feeds
+        working-directory: ${{ env.SDK_DIR }}
+        run: |
+          set -eux
+
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Configure SDK
+        working-directory: ${{ env.SDK_DIR }}
+        run: |
+          set -eux
+
+          make defconfig
+
+      - name: Show target information
+        working-directory: ${{ env.SDK_DIR }}
+        run: |
+          set -eux
+
+          echo "=== Target ==="
+          grep -E \
+            'CONFIG_TARGET_mediatek=y|CONFIG_TARGET_mediatek_filogic=y|CONFIG_ARCH="aarch64"' \
+            .config || true
+
+          echo
+          echo "=== libpcap ==="
+          find staging_dir -type f \
+            \( -name 'pcap.h' -o -name 'libpcap*.a' -o -name 'libpcap*.so*' \) \
+            -print 2>/dev/null | head -50 || true
+
+          echo
+          echo "=== libnl ==="
+          find staging_dir -type f \
+            \( -name 'libnl*.pc' -o -name 'libnl*.a' -o -name 'libnl*.so*' \) \
+            -print 2>/dev/null | head -100 || true
+
+      - name: Build MDK4
+        working-directory: ${{ env.SDK_DIR }}
+        run: |
+          set -eux
+
+          make package/mdk4/clean V=s || true
+          make package/mdk4/compile V=s
+
+      - name: Verify package
+        working-directory: ${{ env.SDK_DIR }}
+        run: |
+          set -eux
+
+          echo "=== IPK files ==="
+          find bin/packages -type f -name 'mdk4_*.ipk' -print
+
+          IPK="$(find bin/packages -type f -name 'mdk4_*.ipk' | head -1)"
+
+          test -n "$IPK"
+          test -f "$IPK"
+
+          echo
+          echo "=== Package architecture ==="
+          tar -xOf "$IPK" ./control.tar.gz | tar -xzOf - ./control | grep -E '^(Package|Version|Architecture|Depends):'
+
+          echo
+          echo "=== Extract binary ==="
+          rm -rf /tmp/mdk4-check
+          mkdir -p /tmp/mdk4-check
+
+          tar -xOf "$IPK" ./data.tar.gz | tar -xzOf - ./usr/sbin/mdk4 > /tmp/mdk4-check/mdk4
+
+          file /tmp/mdk4-check/mdk4
+
+          echo
+          echo "=== ELF check ==="
+          readelf -h /tmp/mdk4-check/mdk4 | grep -E 'Class|Machine'
+
+      - name: Upload Filogic IPK
+        uses: actions/upload-artifact@v4
+        with:
+          name: mdk4-openwrt-24.10.0-filogic
+          path: |
+            ${{ env.SDK_DIR }}/bin/packages/**/*.ipk
+          if-no-files-found: error
+          retention-days: 30
