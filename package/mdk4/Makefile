@@ -1,41 +1,43 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=mdk4
-PKG_VERSION:=4.2
-PKG_RELEASE:=2
+PKG_VERSION:=4.2-dev
+PKG_RELEASE:=1
+
+PKG_BUILD_DIR:=$(BUILD_DIR)/mdk4-$(PKG_VERSION)
 
 PKG_SOURCE_PROTO:=git
 PKG_SOURCE_URL:=https://github.com/aircrack-ng/mdk4.git
-PKG_SOURCE_VERSION:=4.2
-PKG_MIRROR_HASH:=skip
+PKG_SOURCE_VERSION:=36ca143a2e6c0b75b5ec60143b0c5eddd3d2970c
+PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION)-$(PKG_SOURCE_VERSION).tar.gz
+PKG_SOURCE_SUBDIR:=$(PKG_NAME)-$(PKG_VERSION)
 
-PKG_LICENSE:=GPL-3.0-or-later
-PKG_MAINTAINER:=Local OpenWrt Build
+PKG_MAINTAINER:=OpenWrt MDK4 package
 
-PKG_BUILD_DEPENDS:=libpcap libnl-tiny
+PKG_BUILD_PARALLEL:=1
 
 include $(INCLUDE_DIR)/package.mk
 
 define Package/mdk4
   SECTION:=net
   CATEGORY:=Network
+  SUBMENU:=Wireless
   TITLE:=MDK4 wireless testing tool
-  DEPENDS:=+libpcap +libnl-tiny
+  URL:=https://github.com/aircrack-ng/mdk4
+  DEPENDS:=+libpthread +libnl +libpcap
 endef
 
 define Package/mdk4/description
  MDK4 wireless testing and auditing tool.
- Built specifically for the target OpenWrt SDK.
+ Developer version 4.2-dev.
 endef
 
+MAKE_FLAGS += \
+	$(TARGET_CONFIGURE_OPTS)
+
 define Build/Compile
-	$(MAKE) -C $(PKG_BUILD_DIR) \
-		CC="$(TARGET_CC)" \
-		AR="$(TARGET_AR)" \
-		RANLIB="$(TARGET_RANLIB)" \
-		CFLAGS="$(TARGET_CFLAGS) -fcommon -D LINKTYPE_ETHERNET=1 -D LINKTYPE_IEEE802_11=105 -D LINKTYPE_PRISM_HEADER=119 -D LINKTYPE_RADIOTAP_HDR=127 -D LINKTYPE_PPI_HDR=192 -D TCPDUMP_MAGIC=0xa1b2c3d4" \
-		CPPFLAGS="$(TARGET_CPPFLAGS) -D LINKTYPE_ETHERNET=1 -D LINKTYPE_IEEE802_11=105 -D LINKTYPE_PRISM_HEADER=119 -D LINKTYPE_RADIOTAP_HDR=127 -D LINKTYPE_PPI_HDR=192 -D TCPDUMP_MAGIC=0xa1b2c3d4" \
-		LDFLAGS="$(TARGET_LDFLAGS)"
+	$(MAKE) -C $(PKG_BUILD_DIR)/src \
+		$(TARGET_CONFIGURE_OPTS)
 endef
 
 define Package/mdk4/install
